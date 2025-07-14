@@ -1,0 +1,192 @@
+blueprint:
+  domain: automation
+  name: Gestion des volets
+  description: '# Gestion automatique des volets'
+
+  homeassistant:
+    min_version: 2024.6.0
+
+  input:
+    cover_entity:
+      name: Volet(s) à gérer
+      description: Sélectionnez le(s) volet(s) à gérer automatiquement.
+      selector:
+        entity:
+          multiple: true
+          domain:
+          - cover
+
+    morning:
+      name: Ouverture le matin
+      description: Ouvre les volets à heure fixe à X% s'ils sont en dessous de cette position.
+      input:
+        morning_enabled:
+          name: Actif ?
+          default: true
+          selector:
+            boolean: {}
+
+        morning_time:
+          name: Heure d'ouverture
+          default: '07:00:00'
+          selector:
+            time: {}
+
+        morning_position:
+          name: Position d'ouverture
+          default: 14
+          selector:
+            number:
+              min: 0.0
+              max: 100.0
+              unit_of_measurement: '%'
+              step: 1.0
+              mode: slider
+
+    evening:
+      name: Fermeture le soir
+      description: Ferme les volets à heure fixe à X% s'ils sont au-dessus de cette position.
+      input:
+        evening_enabled:
+          name: Actif ?
+          default: true
+          selector:
+            boolean: {}
+
+        evening_time:
+          name: Heure de fermeture
+          default: '20:00:00'
+          selector:
+            time: {}
+
+        evening_position:
+          name: Position de fermeture
+          default: 0
+          selector:
+            number:
+              min: 0.0
+              max: 100.0
+              unit_of_measurement: '%'
+              step: 1.0
+              mode: slider
+
+    sunset:
+      name: Fermeture au coucher du soleil
+      description: Ferme les volets à X% si les volets sont au-dessus de cette position et que le soleil est en dessous de l'élévation définie.
+      input:
+        sunset_enabled:
+          name: Actif ?
+          default: true
+          selector:
+            boolean: {}
+
+        sunset_elevation:
+          name: Élévation du soleil
+          description: L'élévation du soleil en dessous de laquelle les volets doivent se fermer le soir.
+          default: 0
+          selector:
+            number:
+              min: -6.0
+              max: 50.0
+              unit_of_measurement: 'º'
+              step: 0.5
+              mode: slider
+
+        sunset_position:
+          name: Position de fermeture au coucher du soleil
+          description: Position à laquelle les volets doivent se fermer lorsque le soleil se couche.
+          default: 0
+          selector:
+            number:
+              min: 0.0
+              max: 100.0
+              unit_of_measurement: '%'
+              step: 1.0
+              mode: slider
+
+trigger_variables:
+  morning_time: !input morning_time
+  evening_time: !input evening_time
+  sunset_elevation: !input sunset_elevation
+
+mode: single
+
+triggers:
+- trigger: time
+  at: '{{ morning_time }}'
+  id: morning
+- trigger: time
+  at: '{{ evening_time }}'
+  id: evening
+- trigger: template
+  id: sunset
+  value_template: '{{ is_state("binary_sensor.sun_solar_rising", "off") and state_attr("sun.sun", "elevation") < sunset_elevation }}'
+
+conditions: []
+variables:
+  morning_enabled: !input morning_enabled
+  evening_enabled: !input evening_enabled
+  sunset_enabled: !input sunset_enabled
+
+actions:
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ morning_enabled }}'
+    - condition: trigger
+      id:
+      - morning
+    - condition: numeric_state
+      entity_id: !input cover_entity
+      attribute: current_position
+      below: !input morning_position
+    sequence:
+    - action: cover.set_cover_position
+      metadata: {}
+      data:
+        position: !input morning_position
+      target:
+        entity_id: !input cover_entity
+
+  - conditions:
+    - condition: template
+      value_template: '{{ evening_enabled }}'
+    - condition: trigger
+      id:
+      - evening
+    - condition: numeric_state
+      entity_id: !input cover_entity
+      attribute: current_position
+      above: !input evening_position
+    sequence:
+    - action: cover.set_cover_position
+      metadata: {}
+      data:
+        position: !input evening_position
+      target:
+        entity_id: !input cover_entity
+
+  - conditions:
+    - condition: template
+      value_template: '{{ sunset_enabled }}'
+    - condition: template
+      value_template: '{{ is_state("binary_sensor.sun_solar_rising", "off") }}'
+    - condition: template
+      value_template: '{{ state_attr("sun.sun", "elevation") < sunset_elevation}}'
+    - condition: state
+      entity_id: binary_sensor.sun_solar_rising
+      state: "off"
+    - condition: numeric_state
+      entity_id: sun.sun
+      attribute: elevation
+      below: !input sunset_elevation
+    - condition: numeric_state
+      entity_id: !input cover_entity
+      attribute: current_position
+      above: !input sunset_position
+    sequence:
+    - action: cover.close_cover
+      metadata: {}
+      data: {}
+      target:
+        entity_id: !input cover_entity
